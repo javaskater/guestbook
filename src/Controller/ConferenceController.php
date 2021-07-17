@@ -3,10 +3,13 @@
 namespace App\Controller;
 
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-//use App\Repository\ConferenceRepository;
+use App\Repository\ConferenceRepository;
 use App\Entity\Comment;
+use App\Message\CommentMessage;
 use App\Form\CommentFormType;
 use App\Entity\Conference;
+//use App\SpamChecker;
+use Symfony\Component\Messenger\MessageBusInterface;
 use App\Repository\CommentRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\File\Exception\FileException;
@@ -19,20 +22,37 @@ class ConferenceController extends AbstractController
 {
     private $twig;
     private $entityManager;
+    private $bus;
 
-    public function __construct(Environment $twig, EntityManagerInterface $entityManager){
+    public function __construct(Environment $twig, EntityManagerInterface $entityManager, MessageBusInterface $bus){
         $this->twig = $twig;
         $this->entityManager = $entityManager;
+        $this->bus = $bus;
+    }
+
+    /**
+     * @Route("/conference_header", name="conference_header")
+     */
+    public function conferenceHeader(ConferenceRepository $conferenceRepository):Response{
+        $response = $this->render('conference/header.html.twig', [
+            'conferences' => $conferenceRepository->findAll(),
+        ]);
+        /*$response = new Response($this->twig->render('conference/index.html.twig', []));*/
+        //$response->setSharedMaxAge(3600);
+
+        return $response;
     }
     
     /**
      * @Route("/", name="homepage")
      */
-    public function index():Response{
-        /*return $this->render('conference/index.html.twig', [
+    public function index(ConferenceRepository $conferenceRepository):Response{
+        $response = new Response($this->twig->render('conference/index.html.twig', [
             'conferences' => $conferenceRepository->findAll(),
-        ]);*/
-        return new Response($this->twig->render('conference/index.html.twig', []));
+        ]));
+        //$response->setSharedMaxAge(3600);
+
+        return $response;
 
         /*$greet = "";
         if ($name){
@@ -70,6 +90,17 @@ EOF
             }
             $this->entityManager->persist($comment);
             $this->entityManager->flush();
+            $context = [
+                'user_ip' => $request->getClientIp(),
+                'user_agent' => $request->headers->get('user-agent'),
+                'referer' => $request->headers->get('referer'),
+                'permalink' => $request->getUri(),
+            ];
+            /*if (2 === $spamChecker->getSpamScore($comment, $context)){
+                throw new \RuntimeException('Blatant spam, go away!!!');
+            }
+            $this->entityManager->flush();*/
+            $this->bus->dispatch(new CommentMessage($comment->getId(), $context));
             return $this->redirectToRoute('conference', ['slug'=> $conference->getSlug()]);
         }
         $offset = max(0, $request->query->getInt('offset',0));
